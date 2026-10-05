@@ -35,7 +35,7 @@ struct JointConfig {
 
 namespace Config {
   // pins
-  constexpr uint8_t PIN_J1X = 32, PIN_J1Y = 33, PIN_J2X = 34, PIN_J2Y = 35;   // ADC1 only
+  constexpr uint8_t PIN_J1X = 33, PIN_J1Y = 32, PIN_J2X = 34, PIN_J2Y = 35;   // ADC1 only
   constexpr uint8_t PIN_GRIP_POT = 36;                                        // gpio 36 is VP on the board
   constexpr uint8_t PIN_J1_BTN = 16, PIN_J2_BTN = 17, PIN_ARM_BTN = 4;
   constexpr uint8_t PIN_LED = 2;
@@ -49,9 +49,9 @@ namespace Config {
   constexpr JointConfig JOINTS[NUM_JOINTS] = {
     // name   pin  min   max  rest  cal0 cal180 speed enabled
     { "BAS",  23,    5, 175,   90,  544, 2400,   60, true  },   // MG90S
-    { "SHL",  18,    0,  90,    0,  544, 2400,   40, true  },   // MG90S (best-tested)
-    { "ELB",  19,   20, 170,  100,  544, 2400,   50, true  },   // MG90S
-    { "WRP",  25,    0, 180,   90,  544, 2400,   60, false },   // MG90S
+    { "SHL",  18,    0,  170,    90,  544, 2400,   40, true  },   // MG90S (best-tested)
+    { "ELB",  19,   0, 180,  100,  544, 2400,   50, true  },   // MG90S
+    { "WRP",  25,    0, 180,   90,  544, 2400,   60, true },   // MG90S
     { "WRR",  26,   30, 150,   90,  544, 2400,   90, true  },   // SG90
     { "GRP",  27,   65, 120,   65,  544, 2400,  180, true  },   // SG90
   };
@@ -83,7 +83,7 @@ namespace Config {
   // ---------------- safety ----------------
   constexpr bool  INTERLOCK_ENABLED            = true;
   constexpr float SHOULDER_HIGH_BELOW_DEG      = 35;    // shoulder target at/below this = "raised"
-  constexpr float ELBOW_MIN_WHEN_SHOULDER_HIGH = 100;
+  constexpr float ELBOW_MIN_WHEN_SHOULDER_HIGH = 100; // prevents elbow and wrist from hitting the ground when shoulder is lowered
   constexpr int   HARD_MIN_US = 500, HARD_MAX_US = 2500;
   constexpr float CAL_SPEED_DPS = 20;                   // slow moves in calibration mode
 
