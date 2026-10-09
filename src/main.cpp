@@ -50,10 +50,10 @@ namespace Config {
     // name   pin  min   max  rest  cal0 cal180 speed enabled
     { "BAS",  23,    5, 175,   90,  544, 2400,   60, true  },   // MG90S
     { "SHL",  18,    0,  170,    90,  544, 2400,   40, true  },   // MG90S (best-tested)
-    { "ELB",  19,   10, 180,  100,  544, 2400,   50, true  },   // MG90S
-    { "WRP",  25,    0, 180,   90,  544, 2400,   60, true },   // MG90S
-    { "WRR",  26,   30, 150,   90,  544, 2400,   90, true  },   // SG90
-    { "GRP",  27,   65, 120,   65,  544, 2400,  180, true  },   // SG90
+    { "ELB",  19,   10, 180,  70,  544, 2400,   50, true  },   // MG90S
+    { "WRP",  25,    65, 180,   90,  544, 2400,   60, true },   // MG90S
+    { "WRR",  26,   10, 170,   90,  544, 2400,   90, true  },   // SG90
+    { "GRP",  27,   65, 160,   65,  544, 3000,  180, true  },   // SG90
   };
 
   // Arming order (first pulse = jump) and rest order (ramped, one at a time)
