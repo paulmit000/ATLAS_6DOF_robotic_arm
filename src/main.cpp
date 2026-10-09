@@ -35,7 +35,7 @@ struct JointConfig {
 
 namespace Config {
   // pins
-  constexpr uint8_t PIN_J1X = 33, PIN_J1Y = 32, PIN_J2X = 34, PIN_J2Y = 35;   // ADC1 only
+  constexpr uint8_t PIN_J1X = 33, PIN_J1Y = 32, PIN_J2X = 35, PIN_J2Y = 34;   // ADC1 only
   constexpr uint8_t PIN_GRIP_POT = 36;                                        // gpio 36 is VP on the board
   constexpr uint8_t PIN_J1_BTN = 16, PIN_J2_BTN = 17, PIN_ARM_BTN = 4;
   constexpr uint8_t PIN_LED = 2;
@@ -49,11 +49,11 @@ namespace Config {
   constexpr JointConfig JOINTS[NUM_JOINTS] = {
     // name   pin  min   max  rest  cal0 cal180 speed enabled
     { "BAS",  23,    5, 175,   90,  544, 2400,   60, true  },   // MG90S
-    { "SHL",  18,    0,  170,    90,  544, 2400,   40, true  },   // MG90S (best-tested)
+    { "SHL",  18,    70,  130,    90,  544, 2400,   40, true  },   // MG90S (best-tested)
     { "ELB",  19,   10, 180,  70,  544, 2400,   50, true  },   // MG90S
-    { "WRP",  25,    65, 180,   90,  544, 2400,   60, true },   // MG90S
+    { "WRP",  25,    10, 180,   90,  544, 2400,   60, true },   // MG90S
     { "WRR",  26,   10, 170,   90,  544, 2400,   90, true  },   // SG90
-    { "GRP",  27,   65, 160,   65,  544, 3000,  180, true  },   // SG90
+    { "GRP",  27,   65, 107,   65,  444, 3000,  180, true  },   // SG90
   };
 
   // Arming order (first pulse = jump) and rest order (ramped, one at a time)
