@@ -49,16 +49,16 @@ namespace Config {
   constexpr JointConfig JOINTS[NUM_JOINTS] = {
     // name   pin  min   max  rest  cal0 cal180 speed enabled
     { "BAS",  23,    5, 175,   90,  544, 2400,   60, true  },   // MG90S
-    { "SHL",  18,    70,  130,    90,  544, 2400,   40, true  },   // MG90S (best-tested)
+    { "SHL",  18,    20,  130,    90,  544, 2400,   40, true  },   // MG90S; <70 requires the fold assist below
     { "ELB",  19,   10, 180,  70,  544, 2400,   50, true  },   // MG90S
     { "WRP",  25,    10, 180,   90,  544, 2400,   60, true },   // MG90S
     { "WRR",  26,   10, 170,   90,  544, 2400,   90, true  },   // SG90
     { "GRP",  27,   65, 107,   65,  444, 3000,  180, true  },   // SG90
   };
 
-  // Arming order (first pulse = jump) and rest order (ramped, one at a time)
-  constexpr JointId ARM_ORDER[]  = { ELBOW, SHOULDER, WRIST_PITCH, WRIST_ROLL, BASE, GRIPPER };
-  constexpr JointId REST_ORDER[] = { GRIPPER, ELBOW, SHOULDER, WRIST_PITCH, WRIST_ROLL, BASE };
+  // Arming/rest move the shoulder before relaxing the elbow and wrist from a folded pose.
+  constexpr JointId ARM_ORDER[]  = { SHOULDER, ELBOW, WRIST_PITCH, WRIST_ROLL, BASE, GRIPPER };
+  constexpr JointId REST_ORDER[] = { GRIPPER, SHOULDER, ELBOW, WRIST_PITCH, WRIST_ROLL, BASE };
   constexpr uint32_t ARM_STEP_MS = 400;
 
   // ---------------- joystick ----------------
@@ -82,8 +82,13 @@ namespace Config {
 
   // ---------------- safety ----------------
   constexpr bool  INTERLOCK_ENABLED            = true;
-  constexpr float SHOULDER_HIGH_BELOW_DEG      = 35;    // shoulder target at/below this = "raised"
-  constexpr float ELBOW_MIN_WHEN_SHOULDER_HIGH = 100; // prevents elbow and wrist from hitting the ground when shoulder is lowered
+  constexpr float SHOULDER_FOLD_TRIGGER_DEG      = 70;
+  constexpr float SHOULDER_CLEARANCE_DEG         = 90;
+  constexpr float SHOULDER_FOLDED_MIN_DEG        = 20;
+  constexpr float ELBOW_FOLDED_AT_MIN_DEG        = 180;
+  constexpr float ELBOW_FOLDED_AT_CLEARANCE_DEG  = 175;
+  constexpr float WRIST_PITCH_COUNTERBALANCE_DEG = 160;
+  constexpr float COORDINATION_TOLERANCE_DEG     = 1.5f;
   constexpr int   HARD_MIN_US = 500, HARD_MAX_US = 2500;
   constexpr float CAL_SPEED_DPS = 20;                   // slow moves in calibration mode
 
@@ -218,6 +223,7 @@ class ServoPwm {
 // delay(): it advances one joint every ARM_STEP_MS while loop() keeps running.
 
 enum ArmPhase { PHASE_DISARMED, PHASE_ARMING, PHASE_RUNNING, PHASE_RESTING, PHASE_CALIBRATING };
+enum ShoulderCoordinationState { SHOULDER_COORD_IDLE, SHOULDER_COORD_FOLDING, SHOULDER_COORD_ACTIVE, SHOULDER_COORD_RETURNING };
 
 struct JointState {
   float target  = 0;
@@ -345,7 +351,7 @@ class ArmController {
       case PHASE_DISARMED: return;                        // no pulses at all
       case PHASE_ARMING:   advanceArming(now); break;
       case PHASE_RESTING:  advanceRest(); break;
-      case PHASE_RUNNING:  applySticks(axis, dt); applyInterlock(); break;
+      case PHASE_RUNNING:  applySticks(axis, dt); applyShoulderCoordination(axis); break;
       case PHASE_CALIBRATING: break;                      // serial drives the selected joint
     }
 
@@ -423,15 +429,143 @@ class ArmController {
     }
   }
 
-  // Uses TARGETS: the elbow is held up before the shoulder even starts rising.
-  void applyInterlock() {
-    if (!Config::INTERLOCK_ENABLED || !_enabled[SHOULDER] || !_enabled[ELBOW]) return;
-    if (_js[SHOULDER].target <= Config::SHOULDER_HIGH_BELOW_DEG &&
-        _js[ELBOW].target < Config::ELBOW_MIN_WHEN_SHOULDER_HIGH) {
-      _js[ELBOW].target = Config::ELBOW_MIN_WHEN_SHOULDER_HIGH;
-    }
+  bool jointAtAngle(int id, float angle) const {
+    return !_enabled[id] ||
+           (fabsf(_js[id].current - angle) <= Config::COORDINATION_TOLERANCE_DEG &&
+            fabsf(_js[id].target - angle) <= Config::COORDINATION_TOLERANCE_DEG);
   }
 
+  float foldedElbowTarget(float shoulderDeg) const {
+    float t = (shoulderDeg - Config::SHOULDER_FOLDED_MIN_DEG) /
+              (Config::SHOULDER_CLEARANCE_DEG - Config::SHOULDER_FOLDED_MIN_DEG);
+    t = constrain(t, 0.0f, 1.0f);
+    return Config::ELBOW_FOLDED_AT_MIN_DEG +
+           t * (Config::ELBOW_FOLDED_AT_CLEARANCE_DEG - Config::ELBOW_FOLDED_AT_MIN_DEG);
+  }
+
+  void setCounterbalanceTargets(float shoulderDeg) {
+    _js[ELBOW].target = foldedElbowTarget(shoulderDeg);
+    _js[WRIST_PITCH].target = Config::WRIST_PITCH_COUNTERBALANCE_DEG;
+  }
+
+  void setCounterbalanceRestTargets() {
+    _js[ELBOW].target = Config::JOINTS[ELBOW].restDeg;
+    _js[WRIST_PITCH].target = Config::JOINTS[WRIST_PITCH].restDeg;
+  }
+
+  bool counterbalanceAtRest() const {
+    return jointAtAngle(ELBOW, Config::JOINTS[ELBOW].restDeg) &&
+           jointAtAngle(WRIST_PITCH, Config::JOINTS[WRIST_PITCH].restDeg);
+  }
+
+  bool counterbalanceAtFoldedPose(float shoulderDeg) const {
+    return jointAtAngle(ELBOW, foldedElbowTarget(shoulderDeg)) &&
+           jointAtAngle(WRIST_PITCH, Config::WRIST_PITCH_COUNTERBALANCE_DEG);
+  }
+
+  // Angles here are commanded/ramped estimates; this arm has no joint-position feedback.
+  // Coordinate the fold only while the shoulder is being moved, then leave the other
+  // joints under joystick control. During transitions, hold the shoulder at 70/90 until
+  // the commanded elbow and wrist-pitch targets reach the requested pose.
+  void applyShoulderCoordination(const float axis[NUM_AXES]) {
+    if (!_enabled[SHOULDER]) return;
+    float& shoulderTarget = _js[SHOULDER].target;
+    bool shoulderInput = fabsf(axis[J1Y]) > 0.0001f;  // J1Y maps to shoulder in both modes
+    float requested = constrain(shoulderTarget, Config::SHOULDER_FOLDED_MIN_DEG,
+                                Config::JOINTS[SHOULDER].maxDeg);
+
+    if (!Config::INTERLOCK_ENABLED || !_enabled[ELBOW] || !_enabled[WRIST_PITCH]) {
+      _shoulderCoordination = SHOULDER_COORD_IDLE;
+      if (shoulderTarget < Config::SHOULDER_FOLD_TRIGGER_DEG)
+        shoulderTarget = Config::SHOULDER_FOLD_TRIGGER_DEG;
+      return;
+    }
+
+    switch (_shoulderCoordination) {
+      case SHOULDER_COORD_IDLE:
+        if (!shoulderInput) return;
+        if (requested < Config::SHOULDER_FOLD_TRIGGER_DEG) {
+          _shoulderCoordination = SHOULDER_COORD_FOLDING;
+          _pendingShoulderTarget = requested;
+          setCounterbalanceTargets(_pendingShoulderTarget);
+          shoulderTarget = Config::SHOULDER_FOLD_TRIGGER_DEG;
+          return;
+        } else if (requested > Config::SHOULDER_CLEARANCE_DEG && !counterbalanceAtRest()) {
+          _shoulderCoordination = SHOULDER_COORD_RETURNING;
+          _returnFromFoldedPose = (_js[SHOULDER].current <= Config::SHOULDER_CLEARANCE_DEG);
+          _pendingShoulderTarget = requested;
+          setCounterbalanceRestTargets();
+          if (_returnFromFoldedPose && !counterbalanceAtRest())
+            shoulderTarget = Config::SHOULDER_CLEARANCE_DEG;
+          return;
+        } else {
+          return;
+        }
+        break;
+
+      case SHOULDER_COORD_FOLDING:
+        if (shoulderInput) _pendingShoulderTarget = requested;
+        if (_pendingShoulderTarget >= Config::SHOULDER_FOLD_TRIGGER_DEG) {
+          _shoulderCoordination = SHOULDER_COORD_IDLE;
+          shoulderTarget = _pendingShoulderTarget;
+          return;
+        }
+        setCounterbalanceTargets(_pendingShoulderTarget);
+        shoulderTarget = Config::SHOULDER_FOLD_TRIGGER_DEG;
+        if (counterbalanceAtFoldedPose(_pendingShoulderTarget)) {
+          _shoulderCoordination = SHOULDER_COORD_ACTIVE;
+          shoulderTarget = _pendingShoulderTarget;
+        }
+        return;
+
+      case SHOULDER_COORD_ACTIVE:
+        if (!shoulderInput) return;
+        _pendingShoulderTarget = requested;
+        if (_pendingShoulderTarget > Config::SHOULDER_CLEARANCE_DEG) {
+          _shoulderCoordination = SHOULDER_COORD_RETURNING;
+          _returnFromFoldedPose = true;
+          setCounterbalanceRestTargets();
+          if (!counterbalanceAtRest()) shoulderTarget = Config::SHOULDER_CLEARANCE_DEG;
+          return;
+        }
+        setCounterbalanceTargets(_pendingShoulderTarget);
+        if (_pendingShoulderTarget < Config::SHOULDER_FOLD_TRIGGER_DEG &&
+            _pendingShoulderTarget < _js[SHOULDER].current &&
+            !counterbalanceAtFoldedPose(_pendingShoulderTarget)) {
+          _shoulderCoordination = SHOULDER_COORD_FOLDING;
+          shoulderTarget = Config::SHOULDER_FOLD_TRIGGER_DEG;
+          return;
+        }
+        shoulderTarget = _pendingShoulderTarget;
+        return;
+
+      case SHOULDER_COORD_RETURNING:
+        if (shoulderInput) _pendingShoulderTarget = requested;
+        if (_pendingShoulderTarget <= Config::SHOULDER_CLEARANCE_DEG) {
+          if (_returnFromFoldedPose) {
+            _shoulderCoordination = SHOULDER_COORD_ACTIVE;
+            setCounterbalanceTargets(_pendingShoulderTarget);
+            if (_pendingShoulderTarget < Config::SHOULDER_FOLD_TRIGGER_DEG &&
+                _pendingShoulderTarget < _js[SHOULDER].current &&
+                !counterbalanceAtFoldedPose(_pendingShoulderTarget)) {
+              _shoulderCoordination = SHOULDER_COORD_FOLDING;
+              shoulderTarget = Config::SHOULDER_FOLD_TRIGGER_DEG;
+              return;
+            }
+          } else {
+            _shoulderCoordination = SHOULDER_COORD_IDLE;
+          }
+          shoulderTarget = _pendingShoulderTarget;
+          return;
+        }
+        setCounterbalanceRestTargets();
+        if (_returnFromFoldedPose && !counterbalanceAtRest())
+          shoulderTarget = Config::SHOULDER_CLEARANCE_DEG;
+        else if (counterbalanceAtRest())
+          _shoulderCoordination = SHOULDER_COORD_IDLE;
+        return;
+    }
+  }
   void rampAndOutput(float dt) {
     for (int i = 0; i < NUM_JOINTS; i++) {
       if (!_enabled[i] || !_js[i].live) continue;
@@ -455,6 +589,9 @@ class ArmController {
 
   JointState  _js[NUM_JOINTS];
   bool        _enabled[NUM_JOINTS] = {};
+  ShoulderCoordinationState _shoulderCoordination = SHOULDER_COORD_IDLE;
+  float       _pendingShoulderTarget = Config::SHOULDER_CLEARANCE_DEG;
+  bool        _returnFromFoldedPose = false;
   ArmPhase    _phase = PHASE_DISARMED;
   Mode        _mode = MODE_ARM;
   const char* _status = "Boot";
