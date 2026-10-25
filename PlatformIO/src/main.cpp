@@ -254,6 +254,7 @@ class ArmController {
 
   void startArming(float knobDeg) {
     if (_phase != PHASE_DISARMED) return;
+    resetShoulderCoordination();
     _gripperClosed = false;
     _gripStartDeg = Config::GRIPPER_USE_POT ? knobDeg : Config::GRIPPER_OPEN_DEG;
     _armIndex = 0;
@@ -263,6 +264,7 @@ class ArmController {
   }
 
   void disarm() {
+    resetShoulderCoordination();
     for (int i = 0; i < NUM_JOINTS; i++) { _js[i].live = false; if (_enabled[i]) ServoPwm::stop(Config::JOINTS[i].pin); }
     _phase = PHASE_DISARMED;
     digitalWrite(Config::PIN_LED, LOW);
@@ -271,6 +273,7 @@ class ArmController {
 
   void startRest() {
     if (_phase != PHASE_RUNNING) { setStatus(_phase == PHASE_DISARMED ? "Arm first" : "Busy"); return; }
+    resetShoulderCoordination();
     _gripperClosed = false;
     _restStage = 0;
     _phase = PHASE_RESTING;
@@ -292,6 +295,7 @@ class ArmController {
   // ---------- calibration mode ----------
   void toggleCalibration() {
     if (_phase == PHASE_CALIBRATING) {
+      resetShoulderCoordination();
       _phase = PHASE_RUNNING;               // targets get clamped back into the table limits
       setStatus("Calibration OFF");
       Serial.println("  Joints outside their table limits will move back inside them.");
@@ -299,6 +303,7 @@ class ArmController {
       return;
     }
     if (_phase != PHASE_RUNNING) { setStatus("Arm first (calibrate)"); return; }
+    resetShoulderCoordination();
     _phase = PHASE_CALIBRATING;
     setStatus("Calibration ON");
     Serial.println("  Sticks ignored, interlock OFF, slow moves. Range 0-180 deg.");
@@ -379,6 +384,12 @@ class ArmController {
 
  private:
   void setStatus(const char* s) { _status = s; Serial.printf("> %s\n", s); }
+
+  void resetShoulderCoordination() {
+    _shoulderCoordination = SHOULDER_COORD_IDLE;
+    _pendingShoulderTarget = Config::SHOULDER_CLEARANCE_DEG;
+    _returnFromFoldedPose = false;
+  }
 
   bool requireCal() { if (_phase != PHASE_CALIBRATING) { Serial.println("  not in calibration mode (type cal)"); return false; } return true; }
 
