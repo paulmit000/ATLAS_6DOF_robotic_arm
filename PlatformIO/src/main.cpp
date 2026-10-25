@@ -82,8 +82,13 @@ namespace Config {
 
   // ---------------- safety ----------------
   constexpr bool  INTERLOCK_ENABLED            = true;
-  constexpr float SHOULDER_HIGH_BELOW_DEG      = 35;    // shoulder target at/below this = "raised"
-  constexpr float ELBOW_MIN_WHEN_SHOULDER_HIGH = 100; // prevents elbow and wrist from hitting the ground when shoulder is lowered
+  constexpr float SHOULDER_FOLD_TRIGGER_DEG      = 70;
+  constexpr float SHOULDER_CLEARANCE_DEG         = 90;
+  constexpr float SHOULDER_FOLDED_MIN_DEG        = 20;
+  constexpr float ELBOW_FOLDED_AT_MIN_DEG        = 180;
+  constexpr float ELBOW_FOLDED_AT_CLEARANCE_DEG  = 175;
+  constexpr float WRIST_PITCH_COUNTERBALANCE_DEG = 160;
+  constexpr float COORDINATION_TOLERANCE_DEG     = 1.5f;
   constexpr int   HARD_MIN_US = 500, HARD_MAX_US = 2500;
   constexpr float CAL_SPEED_DPS = 20;                   // slow moves in calibration mode
 
@@ -218,6 +223,7 @@ class ServoPwm {
 // delay(): it advances one joint every ARM_STEP_MS while loop() keeps running.
 
 enum ArmPhase { PHASE_DISARMED, PHASE_ARMING, PHASE_RUNNING, PHASE_RESTING, PHASE_CALIBRATING };
+enum ShoulderCoordinationState { SHOULDER_COORD_IDLE, SHOULDER_COORD_FOLDING, SHOULDER_COORD_ACTIVE, SHOULDER_COORD_RETURNING };
 
 struct JointState {
   float target  = 0;
@@ -345,7 +351,7 @@ class ArmController {
       case PHASE_DISARMED: return;                        // no pulses at all
       case PHASE_ARMING:   advanceArming(now); break;
       case PHASE_RESTING:  advanceRest(); break;
-      case PHASE_RUNNING:  applySticks(axis, dt); applyInterlock(); break;
+      case PHASE_RUNNING:  applySticks(axis, dt); applyShoulderCoordination(axis); break;
       case PHASE_CALIBRATING: break;                      // serial drives the selected joint
     }
 

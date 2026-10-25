@@ -109,6 +109,11 @@ Close the Arduino Serial Monitor first: only one program can use the USB port.
 
 ---
 
+## Shoulder fold assist
+
+- The shoulder command range is 20–130°, with 90° as rest. When lowering below 70°, the firmware first commands the elbow and wrist pitch into the counterbalance pose. It holds the shoulder at 70° until the commanded joint targets reach that pose.
+- In the compensated range, the elbow target interpolates from 180° at a 20° shoulder command to 175° at 90°; wrist pitch targets 160°. When raising past 90°, elbow and wrist pitch return to their configured rest targets. After shoulder input stops, the other joints can be moved manually again.
+- The controller has no joint-position sensors. Its coordination checks use firmware command estimates, so they cannot confirm a servo physically reached its target under load. Validate slowly with no payload and support the arm. Calibration mode still bypasses the interlock.
 ## Troubleshooting
 
 | Problem | Fix |
